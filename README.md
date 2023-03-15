@@ -10,6 +10,15 @@ A hacky AI voice chat experiment
 - A summary of the previous conversation is saved on exit, to help carry some context over into a new conversation next time you launch it.
 - Recordings and text logs of all conversations are saved locally (in ./conversations)
 
+## Problems
+
+- It probably won't work well in languages other than english.
+- You can't use your keyboard in other apps while this is running.
+- Audio synthesis is slow to generate. This is mitigated some by chunking the response into sentences and starting to synthesize as soon as possible, however this can sometimes create long pauses between sentences if the API response is taking too long. It can also cause the intonation to vary unnaturally from one sentence to the next.
+- Inter-conversation context is based on a summary of the previous conversation and thus will give the appearance of poor memory.
+- Elevenlabs is expensive, you'll quickly use up your character count while using this. Google TTS is provided as an alternative but sounds terrible in comparison.
+- Only tested in Ubuntu, let me know if you get it to work on another OS.
+
 ## Setup
 
 ```bash
