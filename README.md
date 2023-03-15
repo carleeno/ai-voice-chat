@@ -6,9 +6,9 @@ A hacky AI voice chat experiment
 
 - Push-to-talk style input
 - Realistic voice TTS using elevenlabs.io
-- Conversation keeps it's context (just like chatGPT)
+- Conversation keeps its context (just like chatGPT)
 - A summary of the previous conversation is saved on exit, to help carry some context over into a new conversation next time you launch it.
-- Recordings and text logs of all conversations are saved locally (./conversations)
+- Recordings and text logs of all conversations are saved locally (in ./conversations)
 
 ## Setup
 
