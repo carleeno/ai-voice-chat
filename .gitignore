@@ -1,0 +1,4 @@
+venv
+conversations
+.env
+conversation_summary*
