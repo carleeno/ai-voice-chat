@@ -22,8 +22,7 @@ SYSTEM_PROMPT = """
 You are a friendly AI based on GPT-3.5, your name is Haven.
 
 Your output is being converted to audio, try to avoid special characters, words, or formatting which wouldn't translate well to audio.
-
-Try to keep responses short and natural, and avoid long monologues.
+Avoid descriptive actions such as *laughs*, *sighs*, *clears throat*, etc. Instead use words such as haha, ughh, ehem.
 
 When ending a conversation, insert the tag #terminate_chat into your message. Always end the chat after saying goodbye or similar farewell.
 
@@ -81,6 +80,8 @@ class VoiceChat:
 
         with SilenceStdErr():
             self._pa = pyaudio.PyAudio()
+        
+        self._pause_key_pressed = False
         self._record_key_pressed = False
         self._recording = False
         self.conversation_dir = os.path.join(
@@ -91,9 +92,12 @@ class VoiceChat:
 
         self._wisper_thread = Thread(target=self._wisper_threadbody)
         self._wisper_queue = Queue()
+        self._wisper_stability = 0.8
+        self._wisper_similarity_boost = 0.8
 
         self._playback_thread = Thread(target=self._playback_threadbody)
         self._playback_queue = Queue()
+        self._playing = False
 
         self._messages = []
         self._quit = False
@@ -137,7 +141,13 @@ class VoiceChat:
 
         self._chat(initial_prompt)
 
-        print("\n(Press and hold space bar to record audio, press esc to quit.)")
+        while not self._playing:
+            sleep(0.1)
+        while self._playing:
+            sleep(0.1)
+
+        print("\n(Press and hold space bar to record audio, 'p' to pause keyboard capture, ESC to quit.)")
+        print("(Adjust similarity-boost with up/down, and stability with left/right.)")
 
         listener = keyboard.Listener(
             on_press=self._on_press, on_release=self._on_release, suppress=True
@@ -145,11 +155,28 @@ class VoiceChat:
         listener.start()
         while not self._quit:
             sleep(0.1)
+            if self._pause_key_pressed:
+                listener.stop()
+                self._pause_key_pressed = False
+                input("Press enter to resume...")
+                listener = keyboard.Listener(
+                    on_press=self._on_press, on_release=self._on_release, suppress=True
+                )
+                listener.start()
             if self._record_key_pressed:
                 try:
                     file = self._record()
+                    listener.stop()
                     transcript = self._speech_to_text(file)
                     self._chat(transcript)
+                    while not self._playing:
+                        sleep(0.1)
+                    while self._playing:
+                        sleep(0.1)
+                    listener = keyboard.Listener(
+                        on_press=self._on_press, on_release=self._on_release, suppress=True
+                    )
+                    listener.start()
                 except Exception as e:
                     print(f"Error: {e}")
 
@@ -163,8 +190,22 @@ class VoiceChat:
     def _on_press(self, key):
         if key == keyboard.Key.space:
             self._record_key_pressed = True
+        elif key == keyboard.KeyCode.from_char("p"):
+            self._pause_key_pressed = True
         elif key == keyboard.Key.esc:
             self._quit = True
+        elif key == keyboard.Key.up:
+            self._wisper_similarity_boost = min(1, self._wisper_similarity_boost + 0.1)
+            print(f"Similarity boost: {self._wisper_similarity_boost:.1f}")
+        elif key == keyboard.Key.down:
+            self._wisper_similarity_boost = max(0, self._wisper_similarity_boost - 0.1)
+            print(f"Similarity boost: {self._wisper_similarity_boost:.1f}")
+        elif key == keyboard.Key.left:
+            self._wisper_stability = max(0, self._wisper_stability - 0.1)
+            print(f"Stability: {self._wisper_stability:.1f}")
+        elif key == keyboard.Key.right:
+            self._wisper_stability = min(1, self._wisper_stability + 0.1)
+            print(f"Stability: {self._wisper_stability:.1f}")
 
     def _on_release(self, key):
         if key == keyboard.Key.space:
@@ -218,7 +259,7 @@ class VoiceChat:
         print(f"{transcript['text']}")
         return transcript["text"]
 
-    def _chat(self, transcript, supress_output=False, max_tokens=500):
+    def _chat(self, transcript, supress_output=False, max_tokens=1000):
         """Send transcript to gpt turbo and return completion."""
         self._messages.append({"role": "user", "content": transcript})
         completion = openai.ChatCompletion.create(
@@ -278,6 +319,7 @@ class VoiceChat:
             self._quit = True
         if not supress_output:
             self._wisper_queue.put(message["content"][playback_cursor:].strip())
+            self._wisper_queue.put("#done")
         return message["content"]
 
     def _text_to_speech(self, text):
@@ -298,8 +340,8 @@ class VoiceChat:
             json={
                 "text": text,
                 "voice_settings": {
-                    "stability": 0.9,
-                    "similarity_boost": 0.9,
+                    "stability": self._wisper_stability,
+                    "similarity_boost": self._wisper_similarity_boost,
                 },
             },
         )
@@ -316,7 +358,9 @@ class VoiceChat:
         """Thread body for TTS."""
         while True:
             sentence = self._wisper_queue.get()
-            if sentence:
+            if sentence == "#done":
+                self._playback_queue.put("#done")
+            elif sentence:
                 file = self._text_to_speech(sentence)
                 self._playback_queue.put(file)
             else:
@@ -331,7 +375,10 @@ class VoiceChat:
         """Thread body for playback."""
         while True:
             file = self._playback_queue.get()
-            if file:
+            if file == "#done":
+                self._playing = False
+            elif file:
+                self._playing = True
                 self._playback(file)
             else:
                 break
