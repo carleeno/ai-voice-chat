@@ -90,10 +90,10 @@ class VoiceChat:
         os.makedirs(self.conversation_dir)
         self._last_conversation_index = 0
 
-        self._wisper_thread = Thread(target=self._wisper_threadbody)
-        self._wisper_queue = Queue()
-        self._wisper_stability = 0.8
-        self._wisper_similarity_boost = 0.8
+        self._11l_thread = Thread(target=self._11l_threadbody)
+        self._11l_queue = Queue()
+        self._11l_stability = 0.8
+        self._11l_similarity_boost = 0.8
 
         self._playback_thread = Thread(target=self._playback_threadbody)
         self._playback_queue = Queue()
@@ -136,7 +136,7 @@ class VoiceChat:
         initial_prompt = SYSTEM_PROMPT.format(
             time=datetime.now().isoformat(), user=USER, summary=previous_summary
         )
-        self._wisper_thread.start()
+        self._11l_thread.start()
         self._playback_thread.start()
 
         self._chat(initial_prompt)
@@ -183,7 +183,7 @@ class VoiceChat:
         print("\nExiting...")
         listener.stop()
         self._pa.terminate()
-        self._wisper_queue.put(None)
+        self._11l_queue.put(None)
         self._playback_thread.join()
         self._summarize_conversation()
 
@@ -195,17 +195,17 @@ class VoiceChat:
         elif key == keyboard.Key.esc:
             self._quit = True
         elif key == keyboard.Key.up:
-            self._wisper_similarity_boost = min(1, self._wisper_similarity_boost + 0.1)
-            print(f"Similarity boost: {self._wisper_similarity_boost:.1f}")
+            self._11l_similarity_boost = min(1, self._11l_similarity_boost + 0.1)
+            print(f"Similarity boost: {self._11l_similarity_boost:.1f}")
         elif key == keyboard.Key.down:
-            self._wisper_similarity_boost = max(0, self._wisper_similarity_boost - 0.1)
-            print(f"Similarity boost: {self._wisper_similarity_boost:.1f}")
+            self._11l_similarity_boost = max(0, self._11l_similarity_boost - 0.1)
+            print(f"Similarity boost: {self._11l_similarity_boost:.1f}")
         elif key == keyboard.Key.left:
-            self._wisper_stability = max(0, self._wisper_stability - 0.1)
-            print(f"Stability: {self._wisper_stability:.1f}")
+            self._11l_stability = max(0, self._11l_stability - 0.1)
+            print(f"Stability: {self._11l_stability:.1f}")
         elif key == keyboard.Key.right:
-            self._wisper_stability = min(1, self._wisper_stability + 0.1)
-            print(f"Stability: {self._wisper_stability:.1f}")
+            self._11l_stability = min(1, self._11l_stability + 0.1)
+            print(f"Stability: {self._11l_stability:.1f}")
 
     def _on_release(self, key):
         if key == keyboard.Key.space:
@@ -308,7 +308,7 @@ class VoiceChat:
                     )
                     sentence = message["content"][playback_cursor:end_sentence_index]
                     if len(sentence) > 64:
-                        self._wisper_queue.put(sentence.strip())
+                        self._11l_queue.put(sentence.strip())
                         playback_cursor = end_sentence_index
 
         if "#terminate_chat" not in last_word:
@@ -318,8 +318,8 @@ class VoiceChat:
         else:
             self._quit = True
         if not supress_output:
-            self._wisper_queue.put(message["content"][playback_cursor:].strip())
-            self._wisper_queue.put("#done")
+            self._11l_queue.put(message["content"][playback_cursor:].strip())
+            self._11l_queue.put("#done")
         return message["content"]
 
     def _text_to_speech(self, text):
@@ -334,16 +334,19 @@ class VoiceChat:
             response = gTTS(text=text)
             response.save(file)
             return file
+        
 
         response = self._11l_session.post(
             self._11l_url + f"/text-to-speech/{self._voice_id}",
             json={
                 "text": text,
+                "model_id": "eleven_multilingual_v1",
                 "voice_settings": {
-                    "stability": self._wisper_stability,
-                    "similarity_boost": self._wisper_similarity_boost,
+                    "stability": self._11l_stability,
+                    "similarity_boost": self._11l_similarity_boost,
                 },
             },
+            params={"optimize_streaming_latency": "3"},
         )
         response.raise_for_status()
         # ensure content-type is audio/mpeg
@@ -354,10 +357,10 @@ class VoiceChat:
         else:
             raise ValueError("Invalid content-type, expected audio/mpeg")
 
-    def _wisper_threadbody(self):
+    def _11l_threadbody(self):
         """Thread body for TTS."""
         while True:
-            sentence = self._wisper_queue.get()
+            sentence = self._11l_queue.get()
             if sentence == "#done":
                 self._playback_queue.put("#done")
             elif sentence:
