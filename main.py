@@ -10,6 +10,7 @@ import openai
 import pyaudio
 import requests
 from dotenv import load_dotenv
+from faster_whisper import WhisperModel
 from gtts import gTTS
 from playsound import playsound
 from pynput import keyboard
@@ -70,6 +71,8 @@ class VoiceChat:
         openai.api_key = openai_key
         self._elevenlabs_key = elevenlabs_key
 
+        self._whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+
         # create session for elevenlabs
         self._11l_url = "https://api.elevenlabs.io/v1"
         self._11l_session = requests.Session()
@@ -112,7 +115,7 @@ class VoiceChat:
     def run(self):
         """Block and wait for user to hold record_key to record audio.
 
-        After space bar is released, send audio to openai wisper api for speach-to-text,
+        After space bar is released, send audio to openai whisper api for speach-to-text,
         send text to gpt turbo, get completion and send to 11labs for TTS, then playback.
         """
         try:
@@ -234,7 +237,6 @@ class VoiceChat:
         )
         frames = []
         self._recording = True
-        print("\nMe: ", end="", flush=True)
         while True:
             data = stream.read(1024)
             frames.append(data)
@@ -244,6 +246,7 @@ class VoiceChat:
         stream.close()
         file = self._write_wav(frames)
         self._recording = False
+        print()
         return file
 
     def _write_wav(self, frames):
@@ -257,14 +260,22 @@ class VoiceChat:
         wf.close()
         return wav_path
 
-    def _speech_to_text(self, file):
-        """Uploads audio data to wisper and returns the recognized text."""
+    def _speech_to_text_online(self, file):
+        """Uploads audio data to whisper and returns the recognized text."""
         prompt = "The following is a recording of a human speaking to a chat bot:\n\n"
         with open(file, "rb") as f:
             transcript = openai.Audio.transcribe("whisper-1", f, prompt=prompt)
 
         print(f"{transcript['text']}")
         return transcript["text"]
+
+    def _speech_to_text(self, file):
+        """Uses faster-whisper to locally transcribe audio data."""
+        segments, _ = self._whisper_model.transcribe(file, vad_filter=True)
+        # Note: segments is a generator, so processing happens next line
+        transcript = "".join(s.text for s in segments).strip()
+        print(f"Me: {transcript}")
+        return transcript
 
     def _chat(self, transcript, supress_output=False, max_tokens=1000):
         """Send transcript to gpt turbo and return completion."""
