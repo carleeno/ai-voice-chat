@@ -174,19 +174,20 @@ class VoiceChat:
             if self._record_key_pressed:
                 try:
                     file = self._record()
-                    listener.stop()
                     transcript = self._speech_to_text(file)
                     self._chat(transcript)
-                    while not self._playing:
+                    while (
+                        not self._playing
+                        and not self._record_key_pressed
+                        and not self._quit
+                    ):
                         sleep(0.1)
-                    while self._playing:
+                    while (
+                        self._playing
+                        and not self._record_key_pressed
+                        and not self._quit
+                    ):
                         sleep(0.1)
-                    listener = keyboard.Listener(
-                        on_press=self._on_press,
-                        on_release=self._on_release,
-                        suppress=True,
-                    )
-                    listener.start()
                 except Exception as e:
                     print(f"Error: {e}")
 
@@ -195,6 +196,8 @@ class VoiceChat:
         self._pa.terminate()
         self._11l_queue.put(None)
         self._playback_thread.join()
+        # reset self._quit so we don't break the summarization
+        self._quit = False
         self._summarize_conversation()
 
     def _on_press(self, key):
@@ -228,6 +231,7 @@ class VoiceChat:
 
     def _record(self):
         """Starts recording and continues until record key is released."""
+        print()
         stream = self._pa.open(
             format=pyaudio.paInt16,
             channels=1,
@@ -246,7 +250,6 @@ class VoiceChat:
         stream.close()
         file = self._write_wav(frames)
         self._recording = False
-        print()
         return file
 
     def _write_wav(self, frames):
@@ -277,7 +280,7 @@ class VoiceChat:
         print(f"Me: {transcript}")
         return transcript
 
-    def _chat(self, transcript, supress_output=False, max_tokens=1000):
+    def _chat(self, transcript, suppress_output=False, max_tokens=1000):
         """Send transcript to gpt turbo and return completion."""
         self._messages.append({"role": "user", "content": transcript})
         completion = openai.ChatCompletion.create(
@@ -289,26 +292,28 @@ class VoiceChat:
             stream=True,
         )
 
-        message = {}
+        message = {"role": "", "content": ""}
         self._messages.append(message)
         last_word = ""
         playback_cursor = 0
         for data in completion:
+            if self._record_key_pressed or self._quit:
+                # user interrupted the chat
+                last_word += "..."
+                break
             if not data.get("choices"):
                 break
             delta = data["choices"][0]["delta"]
             if delta.get("role"):
                 message["role"] = delta["role"]
-                if not supress_output:
+                if not suppress_output:
                     print("\nHaven: ", end="", flush=True)
             if delta.get("content"):
-                if not message.get("content"):
-                    message["content"] = ""
                 c = delta["content"]
                 if c[0] in [" ", "\n", "\t", "\r", "(", "[", "{", "<", ".", "#"]:
                     if "#terminate_chat" in last_word:
                         self._quit = True
-                    elif not supress_output:
+                    elif not suppress_output:
                         print(last_word, end="", flush=True)
                     if "#terminate_chat" not in last_word:
                         message["content"] += last_word
@@ -320,7 +325,7 @@ class VoiceChat:
                     r"([.!?][\s\n\t\r\"])", message["content"][playback_cursor:]
                 ):
                     end_sentence_match = match  # gets the last match
-                if end_sentence_match and not supress_output:
+                if end_sentence_match and not suppress_output:
                     end_sentence_index = (
                         end_sentence_match.start() + playback_cursor + 1
                     )
@@ -331,11 +336,11 @@ class VoiceChat:
 
         if "#terminate_chat" not in last_word:
             message["content"] += last_word
-            if not supress_output:
+            if not suppress_output:
                 print(last_word)
         else:
             self._quit = True
-        if not supress_output:
+        if not suppress_output:
             self._11l_queue.put(message["content"][playback_cursor:].strip())
             self._11l_queue.put("#done")
         return message["content"]
@@ -380,12 +385,21 @@ class VoiceChat:
             sentence = self._11l_queue.get()
             if sentence == "#done":
                 self._playback_queue.put("#done")
+            elif sentence is None:
+                self._playback_queue.put(None)
+                break
+            elif self._record_key_pressed or self._quit:
+                # empty playback queue
+                while self._playback_queue.qsize() > 0:
+                    try:
+                        self._playback_queue.get(block=False)
+                    except:
+                        pass
+                self._playback_queue.put("#done")
+                sleep(0.2)
             elif sentence:
                 file = self._text_to_speech(sentence)
                 self._playback_queue.put(file)
-            else:
-                self._playback_queue.put(None)
-                break
 
     def _playback(self, file):
         """Plays back an audio/mpeg stream."""
@@ -408,7 +422,7 @@ class VoiceChat:
         if len(self._messages) < 3:
             return
 
-        summary = self._chat(SUMMARIZE_PROMPT, supress_output=True, max_tokens=250)
+        summary = self._chat(SUMMARIZE_PROMPT, suppress_output=True, max_tokens=250)
         with open(self._summary_file, "w") as f:
             f.write(summary)
 
