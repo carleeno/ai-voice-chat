@@ -22,7 +22,10 @@ SYSTEM_PROMPT = """
 You are a friendly AI based on GPT-3.5, your name is Haven.
 
 Your output is being converted to audio, try to avoid special characters, words, or formatting which wouldn't translate well to audio.
+Some numbers and symbols may currently be pronounced incorrectly. For best results, please spell them out.
 Avoid descriptive actions such as *laughs*, *sighs*, *clears throat*, etc. Instead use words such as haha, ughh, ehem.
+
+You can only speak in the following languages: English, German, Polish, Spanish, Italian, French, Portuguese, and Hindi.
 
 When ending a conversation, insert the tag #terminate_chat into your message. Always end the chat after saying goodbye or similar farewell.
 
@@ -80,7 +83,7 @@ class VoiceChat:
 
         with SilenceStdErr():
             self._pa = pyaudio.PyAudio()
-        
+
         self._pause_key_pressed = False
         self._record_key_pressed = False
         self._recording = False
@@ -146,7 +149,9 @@ class VoiceChat:
         while self._playing:
             sleep(0.1)
 
-        print("\n(Press and hold space bar to record audio, 'p' to pause keyboard capture, ESC to quit.)")
+        print(
+            "\n(Press and hold space bar to record audio, 'p' to pause keyboard capture, ESC to quit.)"
+        )
         print("(Adjust similarity-boost with up/down, and stability with left/right.)")
 
         listener = keyboard.Listener(
@@ -174,7 +179,9 @@ class VoiceChat:
                     while self._playing:
                         sleep(0.1)
                     listener = keyboard.Listener(
-                        on_press=self._on_press, on_release=self._on_release, suppress=True
+                        on_press=self._on_press,
+                        on_release=self._on_release,
+                        suppress=True,
                     )
                     listener.start()
                 except Exception as e:
@@ -299,7 +306,7 @@ class VoiceChat:
 
                 end_sentence_match = None
                 for match in re.finditer(
-                    r"([.!?][\s\n\t\r])", message["content"][playback_cursor:]
+                    r"([.!?][\s\n\t\r\"])", message["content"][playback_cursor:]
                 ):
                     end_sentence_match = match  # gets the last match
                 if end_sentence_match and not supress_output:
@@ -334,7 +341,6 @@ class VoiceChat:
             response = gTTS(text=text)
             response.save(file)
             return file
-        
 
         response = self._11l_session.post(
             self._11l_url + f"/text-to-speech/{self._voice_id}",
@@ -346,7 +352,7 @@ class VoiceChat:
                     "similarity_boost": self._11l_similarity_boost,
                 },
             },
-            params={"optimize_streaming_latency": "3"},
+            params={"optimize_streaming_latency": "1"},
         )
         response.raise_for_status()
         # ensure content-type is audio/mpeg
