@@ -125,7 +125,8 @@ class VoiceChat:
         print("Select a voice:")
         print("0. Google TTS")
         for i, voice in enumerate(voices):
-            print(f"{i+1}. {voice['name']}")
+            labels = ", ".join(voice["labels"].values())
+            print(f"{i+1}. {voice['name']} ({labels})")
         if not voices:
             print("(Add an elevenlabs API key to use elevenlabs voices)")
         if not self._elevenlabs_key:
