@@ -100,6 +100,7 @@ class VoiceChat:
         self._11l_queue = Queue()
         self._11l_stability = 0.8
         self._11l_similarity_boost = 0.8
+        self._sentence_pause = 0.5
 
         self._playback_thread = Thread(target=self._playback_threadbody)
         self._playback_queue = Queue()
@@ -107,6 +108,7 @@ class VoiceChat:
 
         self._messages = []
         self._quit = False
+        self._terminate_requested = False
 
         self._summary_file = os.path.join(
             os.path.dirname(__file__), f"conversation_summary.{USER}.txt"
@@ -157,6 +159,7 @@ class VoiceChat:
             "\n(Press and hold space bar to record audio, 'p' to pause keyboard capture, ESC to quit.)"
         )
         print("(Adjust similarity-boost with up/down, and stability with left/right.)")
+        print("(Adjust pause between sentences with PgUp/PgDn.)")
 
         listener = keyboard.Listener(
             on_press=self._on_press, on_release=self._on_release, suppress=True
@@ -220,6 +223,12 @@ class VoiceChat:
         elif key == keyboard.Key.right:
             self._11l_stability = min(1, self._11l_stability + 0.1)
             print(f"Stability: {self._11l_stability:.1f}")
+        elif key == keyboard.Key.page_up:
+            self._sentence_pause = min(1, self._sentence_pause + 0.1)
+            print(f"Sentence pause: {self._sentence_pause:.1f}")
+        elif key == keyboard.Key.page_down:
+            self._sentence_pause = max(0, self._sentence_pause - 0.1)
+            print(f"Sentence pause: {self._sentence_pause:.1f}")
 
     def _on_release(self, key):
         if key == keyboard.Key.space:
@@ -264,7 +273,7 @@ class VoiceChat:
         wf.close()
         return wav_path
 
-    def _speech_to_text_online(self, file):
+    def _speech_to_text(self, file):
         """Uploads audio data to whisper and returns the recognized text."""
         prompt = "The following is a recording of a human speaking to a chat bot:\n\n"
         with open(file, "rb") as f:
@@ -273,7 +282,7 @@ class VoiceChat:
         print(f"{transcript['text']}")
         return transcript["text"]
 
-    def _speech_to_text(self, file):
+    def _speech_to_text_local(self, file):
         """Uses faster-whisper to locally transcribe audio data."""
         segments, _ = self._whisper_model.transcribe(file, vad_filter=True)
         # Note: segments is a generator, so processing happens next line
@@ -281,8 +290,9 @@ class VoiceChat:
         print(f"Me: {transcript}")
         return transcript
 
-    def _chat(self, transcript, suppress_output=False, max_tokens=1000):
+    def _chat(self, transcript, suppress_output=False, max_tokens=None):
         """Send transcript to gpt turbo and return completion."""
+        self._terminate_requested = False
         self._messages.append({"role": "user", "content": transcript})
         completion = openai.ChatCompletion.create(
             model=self._model,
@@ -313,7 +323,7 @@ class VoiceChat:
                 c = delta["content"]
                 if c[0] in [" ", "\n", "\t", "\r", "(", "[", "{", "<", ".", "#"]:
                     if "#terminate_chat" in last_word:
-                        self._quit = True
+                        self._terminate_requested = True
                     elif not suppress_output:
                         print(last_word, end="", flush=True)
                     if "#terminate_chat" not in last_word:
@@ -340,10 +350,12 @@ class VoiceChat:
             if not suppress_output:
                 print(last_word)
         else:
-            self._quit = True
+            self._terminate_requested = True
         if not suppress_output:
             self._11l_queue.put(message["content"][playback_cursor:].strip())
             self._11l_queue.put("#done")
+        elif self._terminate_requested:
+            self._quit = True
         return message["content"]
 
     def _text_to_speech(self, text):
@@ -405,6 +417,7 @@ class VoiceChat:
     def _playback(self, file):
         """Plays back an audio/mpeg stream."""
         playsound(file, block=True)
+        sleep(self._sentence_pause)
 
     def _playback_threadbody(self):
         """Thread body for playback."""
@@ -412,6 +425,8 @@ class VoiceChat:
             file = self._playback_queue.get()
             if file == "#done":
                 self._playing = False
+                if self._terminate_requested:
+                    self._quit = True
             elif file:
                 self._playing = True
                 self._playback(file)
